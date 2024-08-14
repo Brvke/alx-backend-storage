@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-Defines the get_page function.
-"""
-
-
+"""Module for fetching and caching web pages."""
 import redis
 import requests
 from functools import wraps
@@ -12,38 +8,28 @@ from typing import Callable
 
 r = redis.Redis()
 
-def count_calls(method: Callable) -> Callable:
-    """
-    Decorator to count the number of times a URL is accessed.
-    """
-    @wraps(method)
-    def wrapper(url: str) -> str:
-        # Increment the count for the URL
-        count_key = f"count:{url}"
-        r.incr(count_key)
+def cache_with_expiration(expiration: int):
+    """Decorator to cache the result of a function in Redis with an expiration time."""
+    def decorator(method: Callable) -> Callable:
+        @wraps(method)
+        def wrapper(url: str) -> str:
+            """Caches the result of the function in Redis."""
+            cached_result = r.get(url)
+            if cached_result:
+                return cached_result.decode('utf-8')
 
-        # Retrieve the cached HTML if it exists
-        html = r.get(url)
-        if html:
-            return html.decode("utf-8")
+            result = method(url)
+            r.setex(url, expiration, result)
+            return result
+        return wrapper
+    return decorator
 
-        # Fetch the HTML and cache it
-        html = method(url)
-        r.set(url, html.encode("utf-8"), ex=10)
-        return html
-
-    return wrapper
-
-@count_calls
+@cache_with_expiration(10)
 def get_page(url: str) -> str:
-    """
-    Retrieves the HTML content of a given URL.
+    """Fetches the content of a URL and caches it."""
+    # Track how many times a particular URL was accessed
+    r.incr(f"count:{url}")
 
-    Args:
-        url (str): The URL to fetch.
-
-    Returns:
-        str: The HTML content of the URL.
-    """
+    # Fetch the content of the URL
     response = requests.get(url)
     return response.text
